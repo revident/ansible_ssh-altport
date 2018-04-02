@@ -1,0 +1,72 @@
+---
+
+- name: Install Packages Needed for SELUNIX manipulation.
+  package: name={{ item }}
+  with_items:
+    - policycoreutils-python
+
+- name: Tell SELINUX we are adding an alternate port for SSH.
+  seport:
+    ports: "{{ sshaltport_sshaltport }}"
+    proto: tcp
+    setype: ssh_port_t
+    state: present
+
+- name: Install Firewalld service definition of an alternate port for SSH.
+  template:
+    src: ssh-altport.xml.j2
+    dest: /etc/firewalld/services/ssh-altport.xml
+    owner: root
+    group: root
+    mode: "0644"
+  register: ssh_altport_xml
+
+- name: Reload Firewalld so it can see our new service.
+  systemd:
+    name: firewalld
+    state: reloaded
+  when: ssh_altport_xml.changed
+
+- name: Enable SSH Alternate Port on Firewalld.
+  firewalld: 
+    service: ssh-altport
+    permanent: true
+    state: enabled
+
+## sshd_config
+# 1) Explicitly enable the default port, so we can still access it on localhost/whitelisted firewall rules.
+# 2) Enable a Alternate Port. This is obscurity just to cut down on log noise from bruteforce attacks.
+# 3) Disable root login for SSH. It is best practice to come in as regular user and sudo.
+
+- name: Uncomment sshd defualt port before adding Alternate Port.
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    state: present
+    line: 'Port 22'
+    insertafter: '^#Port'
+    backup: yes
+    validate: 'sshd -t -f %s'
+
+- name: Ammend sshd config to use new SSH Alternate Port.
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    state: present
+    line: "Port {{ sshaltport_sshaltport }}"
+    insertafter: '^Port 22'
+    validate: 'sshd -t -f %s'
+
+- name: Set sshd to not permit root login.
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    state: present
+    line: 'PermitRootLogin no'
+    insertafter: '^#PermitRootLogin'
+    validate: 'sshd -t -f %s'
+  notify: handler_sshd
+
+- name: Disable defualt SSH port on Firewalld.
+  firewalld: 
+    service: ssh
+    permanent: true
+    state: disabled
+  notify: handler_firewalld

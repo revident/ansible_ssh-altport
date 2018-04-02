@@ -1,0 +1,7 @@
+---
+
+- name: handler_sshd
+  service: name=sshd state=reloaded
+
+- name: handler_firewalld
+  service: name=firewalld state=reloaded
